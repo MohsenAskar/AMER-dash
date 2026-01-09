@@ -1,5 +1,6 @@
-
-import streamlit as st
+import dash
+from dash import dcc, html, Input, Output, State, dash_table
+import dash_bootstrap_components as dbc
 import spacy
 from spacy import displacy
 import pandas as pd
@@ -10,167 +11,43 @@ from translate import Translator
 from summarizer import Summarizer
 import itertools
 import base64
-import requests
-import openpyxl
-import textwrap 
-import requests
+import io
 import json
 from datetime import datetime
+import textwrap
 
+# Initialize Dash app with Bootstrap theme
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+server = app.server  # For deployment
 
-
-st.set_page_config(
-    page_title="AMER tool",
-    page_icon="👨‍⚕️",
-    layout="wide"
-)
-def image_to_base64(image_path):
-    with open(image_path, 'rb') as img_file:
-        return base64.b64encode(img_file.read()).decode('utf-8')
-
-image_path = "cartoon.JPG"
-image_base64 = image_to_base64(image_path)
-st.markdown(
-    f"""
-    <style>
-    .header {{
-        display: flex;
-        justify-content: center; /* Center horizontally */
-        align-items: center; /* Center vertically */
-        padding: 12px;
-        flex-direction: column; /* Stack items vertically */
-        position: absolute;
-        top: 0%;  /* Adjust vertical position to be slightly higher */
-        right: -10%; /* Horizontal center */
-        transform: translate(-50%, -40%); /* Adjust to keep the element centered with the new top value */
-    }}
-    .header img {{
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        margin-bottom: 5px; /* Space between image and text */
-    }}
-    .header-text {{
-        font-size: 10px;
-        font-weight: normal; /* Regular weight for text */
-        text-align: center;
-    }}
-    </style>
-    <div class="header">
-        <img src="data:image/jpeg;base64,{image_base64}" alt="Mohsen Askar">
-        <div class="header-text">Developed by: Mohsen Askar</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-st.sidebar.title("Modules Description")
-
-with st.sidebar.expander("1. 💊 Recognize Entities"):
-    st.write("""
-    - Recognizes medical entities in the text such as drugs (substance name), diagnoses, etc.
-    - You can specify which type of entities to show or to show them all.
-    """)
-
-with st.sidebar.expander("2. 📋 Correct ICD Codes"):
-    st.write("""
-    - Suggests the correct ICD codes for the diagnoses mentioned in the text.
-    """)
-
-with st.sidebar.expander("3. 💉 Inject ATC Codes"):
-    st.write("""
-    - Inserts the correct ATC codes to the substances and drug names in the text.
-    """)
-
-with st.sidebar.expander("4. 🕵️ Deidentify Patient's Information"):
-    st.write("""
-    - Identifies patient's sensitive info.
-    - Inserts fake names, dates, etc. in the patient records.
-    """)
-
-with st.sidebar.expander("5. ⚠️ Check DDIs"):
-    st.write("""
-    - Checks for possible drug-drug interactions between the drugs mentioned in the text.
-    - Red: severe, Orange: moderate, Green: possible DDIs.
-    """)
-
-with st.sidebar.expander("6. 📈 Visualize Comorbidity Progression"):
-    st.write("""
-    - Draws a directed network of the comorbidities progression in chronological order from the text.
-    """)
-
-with st.sidebar.expander("7. 🧪 Dose Checker"):
-    st.write("""
-    - Returns the correct drug dosage for the identified drugs in the text. Source of doses: Renal Drug Handbook, fifth edition.
-    """)
-
-with st.sidebar.expander("8. 💊⚠️ Dose Checker in Renal Impairment"):
-    st.write("""
-    - Returns the correct drug dosage in case of renal impairment. Source of doses: Renal Drug Handbook, fifth edition.
-    """)
-
-with st.sidebar.expander("9. 📝 EHR Summarizer"):
-    st.write("""
-    - Summarizes the patient records to 50% of the original text.
-    """)
-
-with st.sidebar.expander("10. 🏥 Structure EHR (soon)"):
-    st.write("""
-    - Divides the EHR into episodes of hospital admissions.
-    - Extracts the most relevant information from each episode.
-    """)
-
-with st.sidebar.expander("11. 🚑 Find Side Effects (soon)"):
-    st.write("""
-    - Identifies potential side effects in the text.
-    """)
-
-@st.cache_resource
-def load_nlp_model():
-    return spacy.load('Model/NER_Model')
-
-nlp = load_nlp_model()
-
-@st.cache_resource
-def load_deidentify_model():
-    return spacy.load('nb_core_news_sm')
-
-nlp_deidentify = load_deidentify_model()
-
-@st.cache_resource
-def load_summarizer_model():
-    return Summarizer('distilbert-base-uncased')
-
-summarizer_model = load_summarizer_model()
-
-
-@st.cache_data
-def load_icd10_data():
-    icd10_data= pd.read_csv('Datasets/ICD_Names.csv')
-    icd10_data['diagnosis'] = icd10_data['diagnosis'].str.lower()
-    return icd10_data
-
-@st.cache_data
-def load_atc_data():
-    return pd.read_csv('Datasets/ATC_Injector.csv')  
-
-@st.cache_data
-def load_ddi_data():
-    return pd.read_csv('Datasets/DDIs_2_Columns.csv')  
-
-@st.cache_data
-def load_renal_data():
-    return pd.read_csv('Datasets/Drug_Dose_In_Renal_Impairment_To_Use.csv')  
-
-fake = Faker()
-
-@st.cache_resource
-def load_translators():
+# Load models and data
+@dash.callback(Output('dummy', 'children'), Input('dummy', 'children'))
+def load_models():
+    global nlp, nlp_deidentify, summarizer_model, fake
+    global translator_to_english, translator_to_norwegian
+    global icd10_data, atc_df, ddi_data, renal_dataset
+    
+    nlp = spacy.load('Model/NER_Model')
+    nlp_deidentify = spacy.load('nb_core_news_sm')
+    summarizer_model = Summarizer('distilbert-base-uncased')
+    fake = Faker()
+    
     translator_to_english = Translator(from_lang="no", to_lang="en")
     translator_to_norwegian = Translator(from_lang="en", to_lang="no")
-    return translator_to_english, translator_to_norwegian
+    
+    icd10_data = pd.read_csv('Datasets/ICD_Names.csv')
+    icd10_data['diagnosis'] = icd10_data['diagnosis'].str.lower()
+    atc_df = pd.read_csv('Datasets/ATC_Injector.csv')
+    ddi_data = pd.read_csv('Datasets/DDIs_2_Columns.csv')
+    renal_dataset = pd.read_csv('Datasets/Drug_Dose_In_Renal_Impairment_To_Use.csv')
 
-translator_to_english, translator_to_norwegian = load_translators()
+# Helper functions (same as your original code)
+def image_to_base64(image_path):
+    try:
+        with open(image_path, 'rb') as img_file:
+            return base64.b64encode(img_file.read()).decode('utf-8')
+    except:
+        return ""
 
 def recognize_entities(text, entity_types):
     doc = nlp(text)
@@ -212,16 +89,14 @@ def summarize_text(text, summary_proportion=0.5):
                 translated_text_parts.append(translated_piece)
             translated_text = " ".join(translated_text_parts)
         except Exception as e:
-            st.error(f"Translation to English failed: {e}")
-            return
+            return f"Translation to English failed: {e}"
 
         try:
             summary_english = summarizer_model(translated_text, min_length=60, max_length=500)
             if isinstance(summary_english, list):
                 summary_english = " ".join(summary_english)
         except Exception as e:
-            st.error(f"Summarization failed: {e}")
-            return
+            return f"Summarization failed: {e}"
 
         try:
             summary_norwegian_parts = []
@@ -230,8 +105,7 @@ def summarize_text(text, summary_proportion=0.5):
                 summary_norwegian_parts.append(translated_piece)
             summary_norwegian = " ".join(summary_norwegian_parts)
         except Exception as e:
-            st.error(f"Translation to Norwegian failed: {e}")
-            return
+            return f"Translation to Norwegian failed: {e}"
 
         return f'Summary: {summary_norwegian}'
 
@@ -295,12 +169,11 @@ def patient_identification(text):
         anonymized_data = anonymized_data.replace(real_address, f'<mark style="background-color: blue; color: white;">{fake_address}</mark>')
     return anonymized_data
 
-def check_and_visualize_ddi(text, ddi_data):
+def check_ddi(text, ddi_data):
     doc = nlp(text)
     substances = [ent.text.lower() for ent in doc.ents if ent.label_ == 'SUBSTANCE']
     if len(substances) < 2:
-        st.write("Not enough substances found to check for interactions.")
-        return
+        return pd.DataFrame(), "Not enough substances found to check for interactions."
     results = []
     interactions = set()
     for substance1, substance2 in itertools.combinations(substances, 2):
@@ -315,13 +188,11 @@ def check_and_visualize_ddi(text, ddi_data):
                 results.append({"Substance 1": substance1, 
                                 "Substance 2": substance2, 
                                 "Grade": row.grad})
-    color_dict = {1: 'red', 2: 'orange', 3: 'green'}
+    
     ddi_df = pd.DataFrame(results)
     if ddi_df.empty:
-        st.write("No drug-drug interactions found.")
-        return
-    ddi_df['Grade'] = ddi_df['Grade'].map(lambda x: f'<span style="color: {color_dict.get(x, "black")}; font-weight: bold;">{x}</span>')
-    st.markdown(ddi_df.to_html(escape=False), unsafe_allow_html=True)
+        return pd.DataFrame(), "No drug-drug interactions found."
+    return ddi_df, None
 
 def visualize_comorbidity(text):
     doc = nlp(text)
@@ -333,7 +204,6 @@ def visualize_comorbidity(text):
             seen.add(condition)
             conditions.append(condition)
     if not conditions:
-        st.write("No conditions found to visualize.")
         return None
     graph = nx.DiGraph()
     for i in range(len(conditions)-1):
@@ -344,249 +214,357 @@ def visualize_comorbidity(text):
             node_size=500, node_color='pink', alpha=0.9, with_labels=True)
     plt.axis('off')
     plt.tight_layout()
-    return plt.gcf()
+    
+    # Convert plot to base64
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close()
+    return img_base64
 
-def find_sideeffects(text):
-    st.write("This function is not yet implemented.")
-    return
+# Layout
+image_base64 = image_to_base64("cartoon.JPG")
 
-def structure_ehr(text):
-    st.write("This function is not yet implemented.")
-    return
+app.layout = dbc.Container([
+    # Hidden div for loading models
+    html.Div(id='dummy', style={'display': 'none'}),
+    
+    # Header
+    dbc.Row([
+        dbc.Col([
+            html.Div([
+                html.Img(src=f"data:image/jpeg;base64,{image_base64}", 
+                        style={'border-radius': '50%', 'width': '40px', 'height': '40px'}),
+                html.Div("Developed by: Mohsen Askar", 
+                        style={'font-size': '10px', 'text-align': 'center'})
+            ], style={'position': 'absolute', 'top': '10px', 'right': '10px', 
+                     'text-align': 'center'})
+        ])
+    ]),
+    
+    # Title
+    dbc.Row([
+        dbc.Col([
+            html.H1("AMER tool 📋 (Experimental)", className="text-center mt-4"),
+            html.P("Automatic Medical Entities Recognizer (AMER) tool offers several functionalities to process Norwegian medical text using NLP techniques.",
+                  className="text-center text-muted", style={'font-size': '12px'})
+        ])
+    ]),
+    
+    # Sidebar (using Offcanvas)
+    dbc.Row([
+        dbc.Col([
+            dbc.Button("Modules Description", id="open-offcanvas", n_clicks=0, className="mb-3"),
+            dbc.Offcanvas([
+                dbc.Accordion([
+                    dbc.AccordionItem([
+                        html.P("Recognizes medical entities in the text such as drugs (substance name), diagnoses, etc. You can specify which type of entities to show or to show them all.")
+                    ], title="1. 💊 Recognize Entities"),
+                    dbc.AccordionItem([
+                        html.P("Suggests the correct ICD codes for the diagnoses mentioned in the text.")
+                    ], title="2. 📋 Correct ICD Codes"),
+                    dbc.AccordionItem([
+                        html.P("Inserts the correct ATC codes to the substances and drug names in the text.")
+                    ], title="3. 💉 Inject ATC Codes"),
+                    dbc.AccordionItem([
+                        html.P("Identifies patient's sensitive info. Inserts fake names, dates, etc. in the patient records.")
+                    ], title="4. 🕵️ Deidentify Patient's Information"),
+                    dbc.AccordionItem([
+                        html.P("Checks for possible drug-drug interactions between the drugs mentioned in the text. Red: severe, Orange: moderate, Green: possible DDIs.")
+                    ], title="5. ⚠️ Check DDIs"),
+                    dbc.AccordionItem([
+                        html.P("Draws a directed network of the comorbidities progression in chronological order from the text.")
+                    ], title="6. 📈 Visualize Comorbidity Progression"),
+                    dbc.AccordionItem([
+                        html.P("Returns the correct drug dosage for the identified drugs in the text. Source of doses: Renal Drug Handbook, fifth edition.")
+                    ], title="7. 🧪 Dose Checker"),
+                    dbc.AccordionItem([
+                        html.P("Returns the correct drug dosage in case of renal impairment. Source of doses: Renal Drug Handbook, fifth edition.")
+                    ], title="8. 💊⚠️ Dose Checker in Renal Impairment"),
+                    dbc.AccordionItem([
+                        html.P("Summarizes the patient records to 50% of the original text.")
+                    ], title="9. 📝 EHR Summarizer"),
+                    dbc.AccordionItem([
+                        html.P("Divides the EHR into episodes of hospital admissions. Extracts the most relevant information from each episode.")
+                    ], title="10. 🏥 Structure EHR (soon)"),
+                    dbc.AccordionItem([
+                        html.P("Identifies potential side effects in the text.")
+                    ], title="11. 🚑 Find Side Effects (soon)"),
+                ], start_collapsed=True)
+            ], id="offcanvas", is_open=False, title="Modules Description"),
+        ], width=12)
+    ]),
+    
+    # Input area
+    dbc.Row([
+        dbc.Col([
+            dcc.Textarea(
+                id='ehr-input',
+                placeholder='Paste the EHR text here',
+                style={'width': '100%', 'height': 200},
+                className="mb-3"
+            )
+        ], width=12)
+    ]),
+    
+    # Entity checkboxes
+    dbc.Row([
+        dbc.Col([
+            html.Label("Select the entity type:"),
+            dbc.Row([
+                dbc.Col([dbc.Checkbox(id='check-all', label='All')], width=3),
+                dbc.Col([dbc.Checkbox(id='check-condition', label='CONDITION')], width=3),
+                dbc.Col([dbc.Checkbox(id='check-substance', label='SUBSTANCE')], width=3),
+                dbc.Col([dbc.Checkbox(id='check-physiology', label='PHYSIOLOGY')], width=3),
+            ]),
+            dbc.Row([
+                dbc.Col([dbc.Checkbox(id='check-procedure', label='PROCEDURE')], width=4),
+                dbc.Col([dbc.Checkbox(id='check-anat', label='ANAT_LOC')], width=4),
+                dbc.Col([dbc.Checkbox(id='check-micro', label='MICROORGANISM')], width=4),
+            ], className="mt-2")
+        ], width=12, className="mb-3")
+    ]),
+    
+    # Action buttons
+    dbc.Row([
+        dbc.Col([dbc.Button('Recognize Entities', id='btn-recognize', color='primary', className='w-100')], width=4),
+        dbc.Col([dbc.Button('Correct ICD Codes', id='btn-icd', color='secondary', className='w-100')], width=4),
+        dbc.Col([dbc.Button('Inject ATC Codes', id='btn-atc', color='info', className='w-100')], width=4),
+    ], className="mb-2"),
+    
+    dbc.Row([
+        dbc.Col([dbc.Button('Deidentifier', id='btn-deidentify', color='warning', className='w-100')], width=4),
+        dbc.Col([dbc.Button('Check DDIs', id='btn-ddi', color='danger', className='w-100')], width=4),
+        dbc.Col([dbc.Button('Visualize Comorbidity', id='btn-comorbidity', color='success', className='w-100')], width=4),
+    ], className="mb-2"),
+    
+    dbc.Row([
+        dbc.Col([dbc.Button('Dose Checker', id='btn-dose', color='primary', className='w-100')], width=4),
+        dbc.Col([dbc.Button('Correct Dose Renal', id='btn-renal', color='secondary', className='w-100')], width=4),
+        dbc.Col([dbc.Button('Summarize text', id='btn-summarize', color='info', className='w-100')], width=4),
+    ], className="mb-2"),
+    
+    dbc.Row([
+        dbc.Col([dbc.Button('Structure text (soon)', id='btn-structure', color='warning', className='w-100', disabled=True)], width=6),
+        dbc.Col([dbc.Button('Find Side Effects (soon)', id='btn-side-effects', color='danger', className='w-100', disabled=True)], width=6),
+    ], className="mb-4"),
+    
+    # Output area
+    dbc.Row([
+        dbc.Col([
+            html.Div(id='output-area', className='mt-4')
+        ], width=12)
+    ]),
+    
+    # Footer with visitor count
+    html.Hr(),
+    dbc.Row([
+        dbc.Col([
+            html.Div(id='visitor-count', className='text-center text-muted', 
+                    style={'padding': '10px', 'font-size': '14px'}),
+            html.Div(datetime.now().strftime("%B %d, %Y"), 
+                    className='text-center text-muted', 
+                    style={'font-size': '12px'})
+        ])
+    ])
+], fluid=True)
 
-st.title("AMER tool📋(Experimental)")
-st.markdown(
-    """
-    <p style='font-size:12px; color:gray'>
-        Automatic Medical Entities Recognizer (AMER) tool offers several functionalities to process Norwegian medical text 
-        using NLP techniques, see the sidebar modules for desription.
-    </p>
-    """,
-    unsafe_allow_html=True
+# Callbacks
+@app.callback(
+    Output("offcanvas", "is_open"),
+    Input("open-offcanvas", "n_clicks"),
+    State("offcanvas", "is_open"),
 )
-user_input = st.text_area("Paste the EHR text here")
+def toggle_offcanvas(n1, is_open):
+    if n1:
+        return not is_open
+    return is_open
 
-st.write("Select the entity type:")
-all_checkbox_col, disease_checkbox_col, substance_checkbox_col, physiology_checkbox_col = st.columns(4)
-procedure_checkbox_col, anatomi_checkbox_col, microorganism_checkbox_col = st.columns(3)
+@app.callback(
+    [Output('check-condition', 'value'),
+     Output('check-substance', 'value'),
+     Output('check-physiology', 'value'),
+     Output('check-procedure', 'value'),
+     Output('check-anat', 'value'),
+     Output('check-micro', 'value')],
+    Input('check-all', 'value'),
+    prevent_initial_call=True
+)
+def toggle_all_checkboxes(all_checked):
+    if all_checked:
+        return [True] * 6
+    return [False] * 6
 
-with all_checkbox_col:
-    all_checkbox = st.checkbox("All")
-
-with anatomi_checkbox_col:
-    anatomi_checkbox = st.checkbox("ANAT_LOC")
-
-with disease_checkbox_col:
-    disease_checkbox = st.checkbox("CONDITION")
-
-with microorganism_checkbox_col:
-    microorganism_checkbox = st.checkbox("MICROORGANISM")
-
-with physiology_checkbox_col:
-    physiology_checkbox = st.checkbox("PHYSIOLOGY")
-
-with procedure_checkbox_col:
-    procedure_checkbox = st.checkbox("PROCEDURE")
-
-with substance_checkbox_col:
-    substance_checkbox = st.checkbox("SUBSTANCE")
-
-entity_types = []
-if all_checkbox:
-    entity_types = ["ANAT_LOC", "CONDITION", "MICROORGANISM", "PHYSIOLOGY", "PROCEDURE", "SUBSTANCE"]
-else:
-    if anatomi_checkbox:
-        entity_types.append("ANAT_LOC")
-    if disease_checkbox:
-        entity_types.append("CONDITION")
-    if microorganism_checkbox:
-        entity_types.append("MICROORGANISM")
-    if physiology_checkbox:
-        entity_types.append("PHYSIOLOGY")
-    if procedure_checkbox:
-        entity_types.append("PROCEDURE")
-    if substance_checkbox:
-        entity_types.append("SUBSTANCE")
-
-if st.button('Recognize Entities'):
-    entities, doc = recognize_entities(user_input, entity_types)
-    st.write("Number of recognized entities:", len(entities))
-    if len(entities) > 0:
-        st.write("Recognized entities:")
-        entity_table = []
-        for entity in entities:
-            entity_table.append({"Entity": entity[0], "Type": entity[1]})
-        st.table(entity_table)
-        colors = {"ANAT_LOC": "#FAC748", "CONDITION": "#FF5733", "MICROORGANISM": "#47D1D1", "PHYSIOLOGY": "#2E86C1", "PROCEDURE": "#BB8FCE", "SUBSTANCE": "#27AE60"}
-        options = {"ents": entity_types, "colors": colors}
-        html = displacy.render(doc, style="ent", options=options)
-        html = html.replace("\n", " ")
-        st.write(f"{html}", unsafe_allow_html=True)
-
-correct_icd_codes_button, inject_atc_codes_button, deidentify_patients_button = st.columns(3)
-check_ddis_button, visualize_comorbidity_button, dose_checker_button = st.columns(3)
-correct_renal_dose_button, summarize_ehr_button, structure_ehr_button = st.columns(3)
-find_side_effects_button = st.button('Find Side Effects (soon)')
-
-if correct_icd_codes_button.button('Correct ICD Codes'):
-    icd10_data = load_icd10_data()
-    result = correct_icd_codes(user_input, icd10_data)
-    st.write(result)
-
-if inject_atc_codes_button.button('Inject ATC Codes'):
-    atc_df = load_atc_data()
-    result = atc_code_injection(user_input, atc_df)
-    st.markdown(result, unsafe_allow_html=True)
-
-if deidentify_patients_button.button('Deidentifier'):
-    result = patient_identification(user_input)
-    st.markdown(result, unsafe_allow_html=True)
-
-if check_ddis_button.button('Check DDIs'):
-    ddi_data = load_ddi_data()
-    check_and_visualize_ddi(user_input, ddi_data)
-
-if visualize_comorbidity_button.button('Visualize Comorbidity'):
-    fig = visualize_comorbidity(user_input)
-    if fig:
-        st.set_option('deprecation.showPyplotGlobalUse', False)
-        st.pyplot(fig)
-
-if dose_checker_button.button('Dose Checker'):
-    renal_dataset = load_renal_data()
-    result = dose_check(user_input, renal_dataset)
-    if result:
-        st.write("***Correct Doses:***")
-        for drug, dose in result.items():
-            st.markdown(f"**{drug}:**")
-            st.write(dose)
+@app.callback(
+    Output('output-area', 'children'),
+    [Input('btn-recognize', 'n_clicks'),
+     Input('btn-icd', 'n_clicks'),
+     Input('btn-atc', 'n_clicks'),
+     Input('btn-deidentify', 'n_clicks'),
+     Input('btn-ddi', 'n_clicks'),
+     Input('btn-comorbidity', 'n_clicks'),
+     Input('btn-dose', 'n_clicks'),
+     Input('btn-renal', 'n_clicks'),
+     Input('btn-summarize', 'n_clicks')],
+    [State('ehr-input', 'value'),
+     State('check-all', 'value'),
+     State('check-condition', 'value'),
+     State('check-substance', 'value'),
+     State('check-physiology', 'value'),
+     State('check-procedure', 'value'),
+     State('check-anat', 'value'),
+     State('check-micro', 'value')],
+    prevent_initial_call=True
+)
+def process_action(btn_rec, btn_icd, btn_atc, btn_deid, btn_ddi, btn_comorb, 
+                   btn_dose, btn_renal, btn_summ, text, all_check, cond_check, 
+                   subst_check, phys_check, proc_check, anat_check, micro_check):
+    
+    if not text:
+        return html.Div("Please enter some text first.", className="alert alert-warning")
+    
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return html.Div()
+    
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    # Determine entity types
+    entity_types = []
+    if all_check:
+        entity_types = ["ANAT_LOC", "CONDITION", "MICROORGANISM", "PHYSIOLOGY", "PROCEDURE", "SUBSTANCE"]
     else:
-        st.write("No drugs detected in the text.")
-
-if correct_renal_dose_button.button('Correct Dose Renal'):
-    renal_dataset = load_renal_data()
-    result = get_renal_doses(user_input, renal_dataset)
-    if result:
-        st.write("***Correct Doses for Renal Impairment according to GFR value:***")
-        for drug, dose in result.items():
-            st.markdown(f"**{drug}:**")
-            st.write(dose)
-    else:
-        st.write("No drugs detected in the text.")
-
-if summarize_ehr_button.button('Summarize text'):
-    result = summarize_text(user_input)
-    st.write(result)
-
-if structure_ehr_button.button('Structure text (soon)'):
-    result = structure_ehr(user_input)
-    st.write(result)
-
-if find_side_effects_button:
-    result = find_sideeffects(user_input)
-    st.write(result) 
-
-st.markdown("---")
-
-# Function to get and update the visitor count using a cloud database
-def track_visitor():
-    if 'firebase_option' == True:
-        import firebase_admin
-        from firebase_admin import credentials, db
+        if anat_check: entity_types.append("ANAT_LOC")
+        if cond_check: entity_types.append("CONDITION")
+        if micro_check: entity_types.append("MICROORGANISM")
+        if phys_check: entity_types.append("PHYSIOLOGY")
+        if proc_check: entity_types.append("PROCEDURE")
+        if subst_check: entity_types.append("SUBSTANCE")
+    
+    try:
+        if button_id == 'btn-recognize':
+            entities, doc = recognize_entities(text, entity_types)
+            if len(entities) > 0:
+                entity_df = pd.DataFrame([(e[0], e[1]) for e in entities], columns=['Entity', 'Type'])
+                colors = {"ANAT_LOC": "#FAC748", "CONDITION": "#FF5733", "MICROORGANISM": "#47D1D1", 
+                         "PHYSIOLOGY": "#2E86C1", "PROCEDURE": "#BB8FCE", "SUBSTANCE": "#27AE60"}
+                options = {"ents": entity_types, "colors": colors}
+                html_viz = displacy.render(doc, style="ent", options=options)
+                
+                return html.Div([
+                    html.H5(f"Number of recognized entities: {len(entities)}"),
+                    html.H6("Recognized entities:"),
+                    dash_table.DataTable(
+                        data=entity_df.to_dict('records'),
+                        columns=[{'name': i, 'id': i} for i in entity_df.columns],
+                        style_table={'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left'}
+                    ),
+                    html.Div(html.Iframe(srcDoc=html_viz, style={'width': '100%', 'height': '400px', 'border': 'none'}))
+                ])
+            else:
+                return html.Div("No entities found.", className="alert alert-info")
         
-        # Initialize Firebase (do this only once)
-        if 'firebase_initialized' not in st.session_state:
-            try:
-                cred = credentials.Certificate("your-firebase-credentials.json")
-                firebase_admin.initialize_app(cred, {
-                    'databaseURL': 'https://your-project.firebaseio.com/'
-                })
-                st.session_state.firebase_initialized = True
-            except Exception as e:
-                st.error(f"Error initializing Firebase: {e}")
-                return 0
+        elif button_id == 'btn-icd':
+            result = correct_icd_codes(text, icd10_data)
+            return html.Div([
+                html.H5("ICD Codes:"),
+                html.Pre(json.dumps(result, indent=2))
+            ])
         
-        # Increment the counter
+        elif button_id == 'btn-atc':
+            result = atc_code_injection(text, atc_df)
+            return html.Div(dcc.Markdown(result, dangerously_allow_html=True))
+        
+        elif button_id == 'btn-deidentify':
+            result = patient_identification(text)
+            return html.Div(dcc.Markdown(result, dangerously_allow_html=True))
+        
+        elif button_id == 'btn-ddi':
+            ddi_df, msg = check_ddi(text, ddi_data)
+            if msg:
+                return html.Div(msg, className="alert alert-info")
+            color_dict = {1: 'red', 2: 'orange', 3: 'green'}
+            ddi_df['Color'] = ddi_df['Grade'].map(color_dict)
+            return html.Div([
+                html.H5("Drug-Drug Interactions:"),
+                dash_table.DataTable(
+                    data=ddi_df.to_dict('records'),
+                    columns=[{'name': i, 'id': i} for i in ['Substance 1', 'Substance 2', 'Grade']],
+                    style_data_conditional=[
+                        {'if': {'filter_query': '{Grade} = 1'}, 'color': 'red', 'fontWeight': 'bold'},
+                        {'if': {'filter_query': '{Grade} = 2'}, 'color': 'orange', 'fontWeight': 'bold'},
+                        {'if': {'filter_query': '{Grade} = 3'}, 'color': 'green', 'fontWeight': 'bold'},
+                    ]
+                )
+            ])
+        
+        elif button_id == 'btn-comorbidity':
+            img_base64 = visualize_comorbidity(text)
+            if img_base64:
+                return html.Div([
+                    html.H5("Comorbidity Progression:"),
+                    html.Img(src=f'data:image/png;base64,{img_base64}', style={'width': '100%'})
+                ])
+            else:
+                return html.Div("No conditions found to visualize.", className="alert alert-info")
+        
+        elif button_id == 'btn-dose':
+            result = dose_check(text, renal_dataset)
+            if result:
+                output = [html.H5("Correct Doses:")]
+                for drug, dose in result.items():
+                    output.append(html.H6(f"{drug}:"))
+                    output.append(html.Pre(dose))
+                return html.Div(output)
+            else:
+                return html.Div("No drugs detected in the text.", className="alert alert-info")
+        
+        elif button_id == 'btn-renal':
+            result = get_renal_doses(text, renal_dataset)
+            if result:
+                output = [html.H5("Correct Doses for Renal Impairment according to GFR value:")]
+                for drug, dose in result.items():
+                    output.append(html.H6(f"{drug}:"))
+                    output.append(html.Pre(dose))
+                return html.Div(output)
+            else:
+                return html.Div("No drugs detected in the text.", className="alert alert-info")
+        
+        elif button_id == 'btn-summarize':
+            result = summarize_text(text)
+            return html.Div([
+                html.H5("Summary:"),
+                html.P(result)
+            ])
+        
+    except Exception as e:
+        return html.Div(f"Error: {str(e)}", className="alert alert-danger")
+    
+    return html.Div()
+
+@app.callback(
+    Output('visitor-count', 'children'),
+    Input('dummy', 'children')
+)
+def update_visitor_count(_):
+    # Simple local file-based counter (for development)
+    try:
         try:
-            ref = db.reference('visitor_counter')
-            current_count = ref.get() or 0
-            new_count = current_count + 1
-            ref.set(new_count)
-            return new_count
-        except Exception as e:
-            st.error(f"Error updating counter: {e}")
-            return 0
-    
-    elif 'streamlit_cloud_option' == True:
-        if 'count' not in st.session_state:
-            # This works only on Streamlit Cloud with secrets management
-            try:
-                # Get current count
-                response = requests.get(
-                    "https://kvdb.io/YOUR_BUCKET_ID/visitor_count",
-                    headers={"Content-Type": "application/json"}
-                )
-                current_count = int(response.text) if response.text else 0
-                
-                # Update count
-                new_count = current_count + 1
-                requests.post(
-                    "https://kvdb.io/YOUR_BUCKET_ID/visitor_count",
-                    data=str(new_count),
-                    headers={"Content-Type": "text/plain"}
-                )
-                st.session_state.count = new_count
-                return new_count
-            except Exception as e:
-                st.error(f"Error with KV store: {e}")
-                return 0
-        return st.session_state.count
-    
-    else:
-        if 'count' not in st.session_state:
-            try:
-                with open('visitor_count.txt', 'r') as f:
-                    current_count = int(f.read().strip())
-            except FileNotFoundError:
-                current_count = 0
-            
-            new_count = current_count + 1
-            
-            try:
-                with open('visitor_count.txt', 'w') as f:
-                    f.write(str(new_count))
-                st.session_state.count = new_count
-            except Exception as e:
-                st.error(f"Error saving count: {e}")
-                st.session_state.count = current_count + 1
-                
-        return st.session_state.count
+            with open('visitor_count.txt', 'r') as f:
+                count = int(f.read().strip())
+        except FileNotFoundError:
+            count = 0
+        
+        count += 1
+        
+        with open('visitor_count.txt', 'w') as f:
+            f.write(str(count))
+        
+        return f"👥 Total Visitors: {count}"
+    except:
+        return "👥 Total Visitors: N/A"
 
-# Only increment the counter once per session
-if 'visitor_counted' not in st.session_state:
-    count = track_visitor()
-    st.session_state.visitor_counted = True
-else:
-    count = st.session_state.get('count', 0)
-
-# Display the counter with nice styling
-st.markdown(
-    f"""
-    <div style="text-align: center; padding: 10px; margin-top: 30px; 
-         border-top: 1px solid #f0f0f0; color: #888;">
-        <span style="font-size: 14px;">👥 Total Visitors: {count}</span>
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
-
-today = datetime.now().strftime("%B %d, %Y")
-st.markdown(
-    f"""
-    <div style="text-align: center; color: #888; font-size: 12px; margin-top: 5px;">
-        {today}
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
+if __name__ == '__main__':
+    app.run_server(debug=True, host='0.0.0.0', port=8050)
