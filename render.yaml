@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: amer-tool
+    env: python
+    plan: free  # or starter for better performance
+    runtime: python-3.11.9
+    buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      pip install --only-binary=:all: spacy==3.6.1
+      pip install -r requirements.txt --prefer-binary
+    startCommand: gunicorn amer_dash_app:server --workers 2 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: WEB_CONCURRENCY
+        value: 2
+    # Increase build timeout for large dependencies
+    autoDeploy: true
